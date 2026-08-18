@@ -1,0 +1,767 @@
+import cv2
+import mediapipe as mp
+import math
+import time
+import os
+
+
+# ============================================================
+# SUPER DUPER HANDTRACKER
+# FINAL VERSION 1.0
+# ============================================================
+
+print("======================================")
+print("      SUPER DUPER HANDTRACKER")
+print("      FINAL VERSION 1.0")
+print("======================================")
+
+
+# ============================================================
+# MEDIAPIPE
+# ============================================================
+
+BaseOptions = mp.tasks.BaseOptions
+HandLandmarker = mp.tasks.vision.HandLandmarker
+
+HandLandmarkerOptions = (
+    mp.tasks.vision.HandLandmarkerOptions
+)
+
+VisionRunningMode = (
+    mp.tasks.vision.RunningMode
+)
+
+
+# ============================================================
+# MODEL
+# ============================================================
+
+model_path = os.path.join(
+    os.path.dirname(
+        os.path.abspath(__file__)
+    ),
+    "hand_landmarker.task"
+)
+
+
+if not os.path.exists(model_path):
+
+    print()
+    print("ERROR: hand_landmarker.task not found!")
+    print("Put hand_landmarker.task next to main.py")
+    print()
+
+    exit()
+
+
+options = HandLandmarkerOptions(
+
+    base_options=BaseOptions(
+        model_asset_path=model_path
+    ),
+
+    running_mode=VisionRunningMode.IMAGE,
+
+    num_hands=1,
+
+    min_hand_detection_confidence=0.5,
+
+    min_hand_presence_confidence=0.5,
+
+    min_tracking_confidence=0.5
+)
+
+
+detector = HandLandmarker.create_from_options(
+    options
+)
+
+
+# ============================================================
+# CAMERA
+# ============================================================
+
+camera = cv2.VideoCapture(0)
+
+camera.set(
+    cv2.CAP_PROP_FRAME_WIDTH,
+    1280
+)
+
+camera.set(
+    cv2.CAP_PROP_FRAME_HEIGHT,
+    720
+)
+
+
+if not camera.isOpened():
+
+    print("ERROR: Camera could not be opened.")
+
+    detector.close()
+
+    exit()
+
+
+# ============================================================
+# DRAWING
+# ============================================================
+
+strokes = []
+
+current_stroke = None
+
+drawing = False
+
+
+# ============================================================
+# FPS
+# ============================================================
+
+previous_time = time.time()
+
+fps = 0
+
+
+# ============================================================
+# HAND CONNECTIONS
+# ============================================================
+
+connections = [
+
+    (0, 1),
+    (1, 2),
+    (2, 3),
+    (3, 4),
+
+    (0, 5),
+    (5, 6),
+    (6, 7),
+    (7, 8),
+
+    (0, 9),
+    (9, 10),
+    (10, 11),
+    (11, 12),
+
+    (0, 13),
+    (13, 14),
+    (14, 15),
+    (15, 16),
+
+    (0, 17),
+    (17, 18),
+    (18, 19),
+    (19, 20),
+
+    (5, 9),
+    (9, 13),
+    (13, 17)
+
+]
+
+
+# ============================================================
+# FUNCTIONS
+# ============================================================
+
+def distance(a, b):
+
+    return math.sqrt(
+        (a[0] - b[0]) ** 2
+        +
+        (a[1] - b[1]) ** 2
+    )
+
+
+def landmark_to_pixel(
+    landmark,
+    width,
+    height
+):
+
+    return (
+        int(landmark.x * width),
+        int(landmark.y * height)
+    )
+
+
+def point_to_segment_distance(
+    point,
+    a,
+    b
+):
+
+    px, py = point
+
+    ax, ay = a
+    bx, by = b
+
+    dx = bx - ax
+    dy = by - ay
+
+    if dx == 0 and dy == 0:
+
+        return distance(
+            point,
+            a
+        )
+
+    t = (
+        (px - ax) * dx
+        +
+        (py - ay) * dy
+    ) / (
+        dx * dx
+        +
+        dy * dy
+    )
+
+    t = max(
+        0,
+        min(1, t)
+    )
+
+    closest = (
+        int(ax + t * dx),
+        int(ay + t * dy)
+    )
+
+    return distance(
+        point,
+        closest
+    )
+
+
+# ============================================================
+# SMOOTH ERASER
+# ============================================================
+
+def erase_at(point):
+
+    global strokes
+
+    new_strokes = []
+
+    ERASER_RADIUS = 28
+
+    for stroke in strokes:
+
+        if len(stroke) < 2:
+
+            continue
+
+
+        # -----------------------------------------------
+        # Rozdelíme čiaru na časti.
+        # Časť pod prstom sa odstráni.
+        # -----------------------------------------------
+
+        current_part = []
+
+        parts = []
+
+
+        for i in range(
+            len(stroke) - 1
+        ):
+
+            a = stroke[i]
+            b = stroke[i + 1]
+
+
+            hit = (
+                point_to_segment_distance(
+                    point,
+                    a,
+                    b
+                )
+                <
+                ERASER_RADIUS
+            )
+
+
+            if hit:
+
+                # Ak sme niečo kreslili,
+                # uložíme tú časť.
+                if len(current_part) >= 2:
+
+                    parts.append(
+                        current_part
+                    )
+
+                current_part = []
+
+
+            else:
+
+                if not current_part:
+
+                    current_part = [a]
+
+                else:
+
+                    current_part.append(a)
+
+
+        # posledný bod
+
+        if current_part:
+
+            current_part.append(
+                stroke[-1]
+            )
+
+
+            if len(current_part) >= 2:
+
+                parts.append(
+                    current_part
+                )
+
+
+        # -----------------------------------------------
+        # Zachováme zostávajúce časti čiary
+        # -----------------------------------------------
+
+        for part in parts:
+
+            if len(part) >= 2:
+
+                new_strokes.append(
+                    part
+                )
+
+
+    strokes = new_strokes
+
+
+# ============================================================
+# MAIN LOOP
+# ============================================================
+
+while True:
+
+    # ========================================================
+    # FPS
+    # ========================================================
+
+    current_time = time.time()
+
+    fps = 1 / max(
+        current_time - previous_time,
+        0.001
+    )
+
+    previous_time = current_time
+
+
+    # ========================================================
+    # CAMERA
+    # ========================================================
+
+    success, frame = camera.read()
+
+    if not success:
+
+        print("Camera error!")
+
+        break
+
+
+    frame = cv2.flip(
+        frame,
+        1
+    )
+
+
+    height, width, _ = frame.shape
+
+
+    # ========================================================
+    # MEDIAPIPE
+    # ========================================================
+
+    rgb = cv2.cvtColor(
+        frame,
+        cv2.COLOR_BGR2RGB
+    )
+
+
+    image = mp.Image(
+        image_format=mp.ImageFormat.SRGB,
+        data=rgb
+    )
+
+
+    result = detector.detect(
+        image
+    )
+
+
+    mode = "IDLE"
+
+
+    # ========================================================
+    # HAND DETECTED
+    # ========================================================
+
+    if result.hand_landmarks:
+
+        hand = result.hand_landmarks[0]
+
+
+        # ----------------------------------------------------
+        # FINGER POSITIONS
+        # ----------------------------------------------------
+
+        index = landmark_to_pixel(
+            hand[8],
+            width,
+            height
+        )
+
+
+        middle = landmark_to_pixel(
+            hand[12],
+            width,
+            height
+        )
+
+
+        # ----------------------------------------------------
+        # FINGER STATES
+        # ----------------------------------------------------
+
+        index_up = (
+            hand[8].y <
+            hand[6].y
+        )
+
+
+        middle_up = (
+            hand[12].y <
+            hand[10].y
+        )
+
+
+        ring_up = (
+            hand[16].y <
+            hand[14].y
+        )
+
+
+        pinky_up = (
+            hand[20].y <
+            hand[18].y
+        )
+
+
+        # ====================================================
+        # OPEN HAND = DRAW
+        # ====================================================
+
+        open_hand = (
+
+            index_up
+            and middle_up
+            and ring_up
+            and pinky_up
+
+        )
+
+
+        # ====================================================
+        # INDEX ONLY = ERASER
+        # ====================================================
+
+        erase_gesture = (
+
+            index_up
+            and not middle_up
+            and not ring_up
+            and not pinky_up
+
+        )
+
+
+        # ====================================================
+        # DRAW
+        # ====================================================
+
+        if open_hand:
+
+            mode = "DRAW"
+
+
+            if not drawing:
+
+                current_stroke = []
+
+                strokes.append(
+                    current_stroke
+                )
+
+                drawing = True
+
+
+            # PROSTREDNIK KRESLÍ
+
+            current_stroke.append(
+                middle
+            )
+
+
+        # ====================================================
+        # ERASE
+        # ====================================================
+
+        elif erase_gesture:
+
+            mode = "ERASER"
+
+            drawing = False
+
+            current_stroke = None
+
+
+            # Ukazovák funguje ako guma
+
+            erase_at(
+                index
+            )
+
+
+        # ====================================================
+        # IDLE
+        # ====================================================
+
+        else:
+
+            mode = "IDLE"
+
+            drawing = False
+
+            current_stroke = None
+
+
+        # ====================================================
+        # HAND SKELETON
+        # ====================================================
+
+        for start_index, end_index in connections:
+
+            start = landmark_to_pixel(
+                hand[start_index],
+                width,
+                height
+            )
+
+
+            end = landmark_to_pixel(
+                hand[end_index],
+                width,
+                height
+            )
+
+
+            cv2.line(
+                frame,
+                start,
+                end,
+                (0, 255, 0),
+                2
+            )
+
+
+        # ====================================================
+        # JOINTS
+        # ====================================================
+
+        for landmark in hand:
+
+            point = landmark_to_pixel(
+                landmark,
+                width,
+                height
+            )
+
+
+            cv2.circle(
+                frame,
+                point,
+                5,
+                (255, 255, 255),
+                -1
+            )
+
+
+        # ====================================================
+        # DRAW CURSOR
+        # ====================================================
+
+        if open_hand:
+
+            cv2.circle(
+                frame,
+                middle,
+                12,
+                (255, 255, 0),
+                3
+            )
+
+
+        # ====================================================
+        # ERASER CURSOR
+        # ====================================================
+
+        if erase_gesture:
+
+            cv2.circle(
+                frame,
+                index,
+                28,
+                (0, 0, 255),
+                3
+            )
+
+
+    else:
+
+        drawing = False
+
+        current_stroke = None
+
+
+    # ========================================================
+    # DRAW ALL STROKES
+    # ========================================================
+
+    for stroke in strokes:
+
+        if len(stroke) > 1:
+
+            for i in range(
+                len(stroke) - 1
+            ):
+
+                cv2.line(
+                    frame,
+                    stroke[i],
+                    stroke[i + 1],
+                    (255, 255, 255),
+                    5
+                )
+
+
+    # ========================================================
+    # UI
+    # ========================================================
+
+    cv2.putText(
+        frame,
+        "SUPER DUPER HANDTRACKER",
+        (30, 45),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.9,
+        (0, 255, 255),
+        2
+    )
+
+
+    cv2.putText(
+        frame,
+        f"MODE: {mode}",
+        (30, 85),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.8,
+        (0, 255, 0),
+        2
+    )
+
+
+    cv2.putText(
+        frame,
+        f"FPS: {fps:.1f}",
+        (30, 120),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.7,
+        (0, 255, 0),
+        2
+    )
+
+
+    cv2.putText(
+        frame,
+        "OPEN HAND = DRAW",
+        (30, height - 85),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.6,
+        (255, 255, 255),
+        2
+    )
+
+
+    cv2.putText(
+        frame,
+        "INDEX FINGER = ERASE",
+        (30, height - 50),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.6,
+        (255, 255, 255),
+        2
+    )
+
+
+    cv2.putText(
+        frame,
+        "C = CLEAR | Q = QUIT",
+        (30, height - 20),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.6,
+        (255, 255, 255),
+        2
+    )
+
+
+    # ========================================================
+    # SHOW
+    # ========================================================
+
+    cv2.imshow(
+        "Super Duper HandTracker",
+        frame
+    )
+
+
+    key = cv2.waitKey(1) & 0xFF
+
+
+    # CLEAR
+
+    if key == ord("c"):
+
+        strokes.clear()
+
+        current_stroke = None
+
+        drawing = False
+
+
+    # QUIT
+
+    if key == ord("q"):
+
+        break
+
+
+# ============================================================
+# CLEANUP
+# ============================================================
+
+camera.release()
+
+detector.close()
+
+cv2.destroyAllWindows()
