@@ -1,34 +1,52 @@
-# 🖐️ Super Duper HandTracker
+# Super Duper HandTracker
 
-A real-time hand tracking drawing system made with Python.
+A Python hand tracking project using MediaPipe and OpenCV.
 
 ## Features
 
-- Real-time hand tracking
+- Hand tracking
 - Finger tracking
-- Draw with middle finger
-- Smooth eraser
-- Hand skeleton
+- Drawing with hand gestures
+- Eraser gesture
+- Pinch-to-move
 - FPS counter
-- Webcam support
+- Hand skeleton visualization
 
 ## Gestures
 
-### 🖐️ Open Hand
+### Open hand
 Draw using your middle finger.
 
-### ☝️ Index Finger
-Use your index finger as an eraser.
+### Index finger
+Erase drawings.
 
-Move the finger across a line to erase only the part you touch.
+### Thumb + index finger
+Pinch to move drawings.
 
 ## Controls
 
-C = Clear
+C - Clear drawing
 
-Q = Quit
+Q - Quit
 
 ## Installation
 
-```bash
-install oepncv and mediapipe
+Install Python and then run:
+
+python -m pip install opencv-python mediapipe numpyt
+
+## Running
+
+python main.py
+
+## Requirements
+
+Python 3.13 recommended.
+
+A webcam is required.
+
+## Credits
+
+Built by Zarix.
+
+Powered by MediaPipe and OpenCV.
