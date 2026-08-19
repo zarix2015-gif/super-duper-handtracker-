@@ -31,4 +31,4 @@ Q = Quit
 ## Installation
 
 ```bash
-pip install -r requirements.txt
+install oepncv and mediapipe
